@@ -2,21 +2,20 @@ services:
   - type: web
     name: nexusverify-api
     runtime: node
+    plan: free
     rootDir: .
     buildCommand: cd backend && npm ci
     startCommand: cd backend && npm start
     healthCheckPath: /health
-    disk:
-      name: nexusverify-data
-      mountPath: /var/data
-      sizeGB: 1
     envVars:
       - key: NODE_ENV
         value: production
       - key: HOST
         value: 0.0.0.0
-      - key: DATABASE_PATH
-        value: /var/data/nexusverify.db
+      - key: DATABASE_URL
+        fromDatabase:
+          name: nexusverify-db
+          property: connectionString
       - key: BLOCKCHAIN_DEPLOYMENT
         value: sepolia
       - key: BLOCKCHAIN_NETWORK_NAME
@@ -37,3 +36,9 @@ services:
         sync: false
       - key: SEED_DEMO_DATA
         value: "false"
+
+databases:
+  - name: nexusverify-db
+    plan: free
+    databaseName: nexusverify
+    user: nexusverify

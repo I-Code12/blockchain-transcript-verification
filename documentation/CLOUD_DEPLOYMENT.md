@@ -36,7 +36,7 @@ From `blockchain`, run `npm run compile`, `npm run preflight:public`, and then `
 
 ## 2. Deploy the secured API
 
-The root `render.yaml` describes the Node API and a persistent disk. Create the service from the repository and provide these secret values in the hosting dashboard:
+The root `render.yaml` describes the Node API and a PostgreSQL datastore. Create the service from the repository and provide these secret values in the hosting dashboard:
 
 - `BLOCKCHAIN_RPC_URL`
 - `REGISTRAR_PRIVATE_KEY`
@@ -45,7 +45,7 @@ The root `render.yaml` describes the Node API and a persistent disk. Create the 
 - `FRONTEND_URL` using the final public website URL
 - `FRONTEND_URLS` using the public URL and any approved preview URLs, separated by commas
 
-The production server listens on `0.0.0.0`, uses the assigned `PORT`, refuses to start without the registrar key and access key, and stores SQLite under `/var/data`.
+The production server listens on `0.0.0.0`, uses the assigned `PORT`, refuses to start without the registrar key and access key, and uses `DATABASE_URL` for PostgreSQL. Local mode continues to use SQLite. Render's free PostgreSQL service expires after 30 days, so create it close to the submission date or upgrade it for longer availability.
 
 ## 3. Publish the website
 

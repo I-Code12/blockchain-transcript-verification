@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import QRCode from "qrcode";
 import { createCertificate } from "./certificate.js";
-import { addAudit, bindContract, countTranscripts, findTranscript, incrementChecks, insertTranscript, listAudit, listTranscripts, markRevoked, nextCredentialId } from "./database.js";
+import { addAudit, bindContract, countTranscripts, databaseEngine, findTranscript, incrementChecks, insertTranscript, listAudit, listTranscripts, markRevoked, nextCredentialId } from "./database.js";
 import { chainStatus, connectChain, issueOnChain, revokeOnChain, signProofPayload, verifyOnChain } from "./chain.js";
 
 const port = Number(process.env.PORT || 4000);
@@ -42,18 +42,18 @@ async function signedProof(row) {
 }
 
 async function issueRecord(input, fixedId) {
-  const id = fixedId || nextCredentialId();
+  const id = fixedId || await nextCredentialId();
   const bytes = input.documentBase64 ? Buffer.from(input.documentBase64, "base64") : Buffer.from(input.documentText || JSON.stringify(input));
   const documentHash = hashDocument(bytes);
   const proof = await issueOnChain(id, documentHash);
   const network = await chainStatus();
   const item = { id,studentName:input.studentName.trim(),matricNumber:input.matricNumber.trim().toUpperCase(),programme:input.programme,award:input.award,documentHash,...proof,contractAddress:network.contractAddress,chainId:network.chainId,issuedAt:new Date().toISOString() };
-  insertTranscript(item); addAudit("Transcript issued", id, `${item.studentName} · Registrar Office`, proof);
-  return present(findTranscript(id), true);
+  await insertTranscript(item); await addAudit("Transcript issued", id, `${item.studentName} · Registrar Office`, proof);
+  return present(await findTranscript(id), true);
 }
 
 async function seed() {
-  if (countTranscripts()) return;
+  if (await countTranscripts()) return;
   const samples = [
     ["NXV-2026-00482","Amara Okafor","ATU/CS/2021/0842","BTech Computer Science","First Class Honours"],
     ["NXV-2026-00479","Daniel Mensah","ATU/EE/2021/0317","BTech Electrical Engineering","Second Class Upper"],
@@ -64,7 +64,7 @@ async function seed() {
 
 await connectChain();
 const initialNetwork = await chainStatus();
-bindContract(initialNetwork.contractAddress);
+await bindContract(initialNetwork.contractAddress);
 if (process.env.NODE_ENV !== "production" || process.env.SEED_DEMO_DATA === "true") await seed();
 
 createServer(async (req,res) => {
@@ -73,22 +73,22 @@ createServer(async (req,res) => {
     const sendBinary = (contentType,filename,value) => binary(req,res,contentType,filename,value);
     const requireAdmin = () => { if (isAdmin(req)) return false; send(401,{message:"Registrar access key required"}); return true; };
     if (req.method === "OPTIONS") return send(204,{});
-    if (req.method === "GET" && req.url === "/health") return send(200,{status:"ok",service:"nexusverify-api",...(await chainStatus()),database:"SQLite persistent",adminProtected:Boolean(adminKey)});
-    if (req.method === "GET" && req.url === "/api/transcripts") { if (requireAdmin()) return; return send(200,{records:await Promise.all(listTranscripts().map(row=>present(row)))}); }
-    if (req.method === "GET" && req.url === "/api/audit") { if (requireAdmin()) return; return send(200,{events:listAudit()}); }
+    if (req.method === "GET" && req.url === "/health") return send(200,{status:"ok",service:"nexusverify-api",...(await chainStatus()),database:databaseEngine,adminProtected:Boolean(adminKey)});
+    if (req.method === "GET" && req.url === "/api/transcripts") { if (requireAdmin()) return; return send(200,{records:await Promise.all((await listTranscripts()).map(row=>present(row)))}); }
+    if (req.method === "GET" && req.url === "/api/audit") { if (requireAdmin()) return; return send(200,{events:await listAudit()}); }
     if (req.method === "GET" && req.url?.startsWith("/api/proof/")) {
-      const id=decodeURIComponent(req.url.split("/").pop()); const row=findTranscript(id); if(!row)return send(404,{message:"Credential not found"});
-      const proof=await signedProof(row); addAudit("Signed proof downloaded",row.id,`${row.student_name} - technical JSON`); return send(200,proof);
+      const id=decodeURIComponent(req.url.split("/").pop()); const row=await findTranscript(id); if(!row)return send(404,{message:"Credential not found"});
+      const proof=await signedProof(row); await addAudit("Signed proof downloaded",row.id,`${row.student_name} - technical JSON`); return send(200,proof);
     }
     if (req.method === "GET" && req.url?.startsWith("/api/certificate/")) {
-      const id=decodeURIComponent(req.url.split("/").pop()); const row=findTranscript(id); if(!row)return send(404,{message:"Credential not found"});
-      const proof=await signedProof(row); const pdf=await createCertificate(proof); addAudit("Certificate downloaded",row.id,`${row.student_name} - signed PDF`); return sendBinary("application/pdf",`${row.id}-verification-certificate.pdf`,pdf);
+      const id=decodeURIComponent(req.url.split("/").pop()); const row=await findTranscript(id); if(!row)return send(404,{message:"Credential not found"});
+      const proof=await signedProof(row); const pdf=await createCertificate(proof); await addAudit("Certificate downloaded",row.id,`${row.student_name} - signed PDF`); return sendBinary("application/pdf",`${row.id}-verification-certificate.pdf`,pdf);
     }
     if (req.method === "GET" && req.url?.startsWith("/api/verify/")) {
-      const value=decodeURIComponent(req.url.split("/").pop()); const row=findTranscript(value);
-      if (!row) { addAudit("Verification failed",null,`Unknown credential: ${value}`); return send(404,{verified:false,message:"Credential not found"}); }
-      const chain=await verifyOnChain(row.id,row.document_hash); incrementChecks(row.id); addAudit(chain.authentic?"Transcript verified":"Verification warning",row.id,`${row.student_name} · Public verifier`);
-      return send(200,{verified:chain.authentic,revoked:chain.revoked,chain,record:await present(findTranscript(row.id),true)});
+      const value=decodeURIComponent(req.url.split("/").pop()); const row=await findTranscript(value);
+      if (!row) { await addAudit("Verification failed",null,`Unknown credential: ${value}`); return send(404,{verified:false,message:"Credential not found"}); }
+      const chain=await verifyOnChain(row.id,row.document_hash); await incrementChecks(row.id); await addAudit(chain.authentic?"Transcript verified":"Verification warning",row.id,`${row.student_name} · Public verifier`);
+      return send(200,{verified:chain.authentic,revoked:chain.revoked,chain,record:await present(await findTranscript(row.id),true)});
     }
     if (req.method === "POST" && req.url === "/api/transcripts") {
       if (requireAdmin()) return;
@@ -97,8 +97,8 @@ createServer(async (req,res) => {
     }
     if (req.method === "POST" && req.url?.endsWith("/revoke")) {
       if (requireAdmin()) return;
-      const id=decodeURIComponent(req.url.split("/").at(-2)); const row=findTranscript(id); if(!row)return send(404,{message:"Credential not found"}); if(row.status==="Revoked")return send(409,{message:"Credential is already revoked"});
-      const proof=await revokeOnChain(id); markRevoked(id,proof); addAudit("Credential revoked",id,`${row.student_name} · Registrar Office`,proof); return send(200,await present(findTranscript(id),true));
+      const id=decodeURIComponent(req.url.split("/").at(-2)); const row=await findTranscript(id); if(!row)return send(404,{message:"Credential not found"}); if(row.status==="Revoked")return send(409,{message:"Credential is already revoked"});
+      const proof=await revokeOnChain(id); await markRevoked(id,proof); await addAudit("Credential revoked",id,`${row.student_name} · Registrar Office`,proof); return send(200,await present(await findTranscript(id),true));
     }
     return send(404,{message:"Route not found"});
   } catch (error) { console.error(error); return reply(req,res,500,{message:error.shortMessage||error.message||"Unexpected error"}); }

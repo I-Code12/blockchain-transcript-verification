@@ -1,8 +1,38 @@
-PRAGMA foreign_keys = ON;
-CREATE TABLE users (id TEXT PRIMARY KEY, full_name TEXT NOT NULL, email TEXT NOT NULL UNIQUE, role TEXT NOT NULL CHECK(role IN ('registrar','auditor')), password_hash TEXT NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE graduates (id TEXT PRIMARY KEY, matric_number TEXT NOT NULL UNIQUE, full_name TEXT NOT NULL, programme TEXT NOT NULL, award_class TEXT NOT NULL, graduation_year INTEGER NOT NULL, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE transcripts (id TEXT PRIMARY KEY, graduate_id TEXT NOT NULL REFERENCES graduates(id), document_hash TEXT NOT NULL UNIQUE, storage_key TEXT, status TEXT NOT NULL DEFAULT 'active' CHECK(status IN ('active','revoked')), issued_by TEXT NOT NULL REFERENCES users(id), issued_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP, revoked_at TEXT, revocation_reason TEXT);
-CREATE TABLE ledger_records (id TEXT PRIMARY KEY, transcript_id TEXT NOT NULL UNIQUE REFERENCES transcripts(id), network TEXT NOT NULL, transaction_hash TEXT NOT NULL UNIQUE, block_number INTEGER NOT NULL, contract_address TEXT NOT NULL, anchored_at TEXT NOT NULL);
-CREATE TABLE verification_events (id TEXT PRIMARY KEY, transcript_id TEXT REFERENCES transcripts(id), supplied_hash TEXT, result TEXT NOT NULL CHECK(result IN ('valid','invalid','revoked','not_found')), verifier_label TEXT, ip_hash TEXT, verified_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE TABLE audit_events (id TEXT PRIMARY KEY, actor_id TEXT REFERENCES users(id), action TEXT NOT NULL, entity_type TEXT NOT NULL, entity_id TEXT, payload_json TEXT NOT NULL DEFAULT '{}', previous_event_hash TEXT, event_hash TEXT NOT NULL UNIQUE, created_at TEXT NOT NULL DEFAULT CURRENT_TIMESTAMP);
-CREATE INDEX idx_transcripts_hash ON transcripts(document_hash); CREATE INDEX idx_verifications_transcript ON verification_events(transcript_id); CREATE INDEX idx_audit_created ON audit_events(created_at);
+CREATE TABLE IF NOT EXISTS metadata (
+  key TEXT PRIMARY KEY,
+  value TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transcripts (
+  id TEXT PRIMARY KEY,
+  student_name TEXT NOT NULL,
+  matric_number TEXT NOT NULL UNIQUE,
+  programme TEXT NOT NULL,
+  award TEXT NOT NULL,
+  document_hash TEXT NOT NULL UNIQUE,
+  transaction_hash TEXT NOT NULL UNIQUE,
+  block_number BIGINT NOT NULL,
+  gas_used TEXT NOT NULL,
+  contract_address TEXT NOT NULL,
+  chain_id BIGINT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('Active', 'Revoked')),
+  checks INTEGER NOT NULL DEFAULT 0,
+  issued_at TEXT NOT NULL,
+  revoked_at TEXT,
+  revocation_tx TEXT,
+  revocation_block BIGINT
+);
+
+CREATE TABLE IF NOT EXISTS audit_events (
+  id BIGSERIAL PRIMARY KEY,
+  action TEXT NOT NULL,
+  transcript_id TEXT,
+  detail TEXT NOT NULL,
+  transaction_hash TEXT,
+  block_number BIGINT,
+  created_at TEXT NOT NULL
+);
+
+CREATE INDEX IF NOT EXISTS idx_transcripts_hash ON transcripts(document_hash);
+CREATE INDEX IF NOT EXISTS idx_transcripts_matric ON transcripts(matric_number);
+CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at DESC);
