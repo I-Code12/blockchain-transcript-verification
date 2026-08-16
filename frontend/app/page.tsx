@@ -6,7 +6,7 @@ type View = "overview" | "issue" | "records" | "verify" | "audit";
 type RecordItem = { id: string; name: string; matric: string; degree: string; award: string; date: string; hash: string; tx: string; block: number; status: "Active" | "Revoked"; checks: number; contract?: string; chainId?: number; gasUsed?: string; qrDataUrl?: string; revocationTx?: string; explorerUrl?:string };
 type AuditItem = { id:number; action:string; detail:string; created_at:string; transaction_hash?:string; block_number?:number };
 type NetworkState = { online:boolean; network:string; chainId:number; latestBlock:number; contractAddress:string; adminProtected?:boolean; explorerBaseUrl?:string };
-const API = (import.meta.env.VITE_API_URL || "http://127.0.0.1:4000").replace(/\/$/, "");
+const API = (import.meta.env.VITE_API_URL || "https://nexusverify-api.onrender.com").replace(/\/$/, "");
 const PUBLIC_MODE = import.meta.env.VITE_PUBLIC_MODE === "true";
 
 const seed: RecordItem[] = [];
