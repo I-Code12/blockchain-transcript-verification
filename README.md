@@ -50,7 +50,7 @@ The test submits genuine issuance and revocation transactions and checks their m
 
 ## Public prototype
 
-The local system remains the offline backup. For a QR code that works after the computer is switched off, follow `documentation/CLOUD_DEPLOYMENT.md`. The prepared public configuration uses a hosted frontend, secured Node API, PostgreSQL datastore and an Ethereum public-testnet contract. Local mode continues to use SQLite.
+The public verifier is available at `https://nexusverify-frontend.onrender.com` and the API health endpoint is `https://nexusverify-api.onrender.com/health`. No ChatGPT login is required. The local system remains the offline backup. For deployment and QR acceptance tests, follow `documentation/CLOUD_DEPLOYMENT.md`. The public configuration uses a Render frontend, secured Node API, PostgreSQL datastore and an Ethereum Sepolia contract. Local mode continues to use SQLite.
 
 ## Important scope note
 

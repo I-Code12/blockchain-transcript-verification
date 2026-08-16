@@ -41,15 +41,15 @@ The root `render.yaml` describes the Node API and a PostgreSQL datastore. Create
 - `BLOCKCHAIN_RPC_URL`
 - `REGISTRAR_PRIVATE_KEY`
 - `ADMIN_API_KEY` using at least 24 random characters
-- `PUBLIC_APP_URL` using the final public website URL
-- `FRONTEND_URL` using the final public website URL
-- `FRONTEND_URLS` using the public URL and any approved preview URLs, separated by commas
+- `PUBLIC_APP_URL`, `FRONTEND_URL` and `FRONTEND_URLS` are configured for `https://nexusverify-frontend.onrender.com`. Change all three together if the public domain changes.
 
 The production server listens on `0.0.0.0`, uses the assigned `PORT`, refuses to start without the registrar key and access key, and uses `DATABASE_URL` for PostgreSQL. Local mode continues to use SQLite. Render's free PostgreSQL service expires after 30 days, so create it close to the submission date or upgrade it for longer availability.
 
 ## 3. Publish the website
 
-The frontend already has a Sites project configuration. Set `VITE_API_URL` to the public API URL and `VITE_PUBLIC_MODE=true`, rebuild, save a new version and deploy the public verifier. Public mode opens directly on credential verification; registrar screens remain protected by the access key. The QR generator uses `PUBLIC_APP_URL`, so every newly downloaded certificate will point to the public website rather than `localhost`.
+The public website is deployed as the free Render web service `nexusverify-frontend` at `https://nexusverify-frontend.onrender.com`. It builds from the `frontend` directory with `npm ci && npm run build`, starts with `npm start`, and uses `VITE_API_URL=https://nexusverify-api.onrender.com` and `VITE_PUBLIC_MODE=true`. Public mode opens directly on credential verification; registrar screens remain protected by the access key. The QR generator uses `PUBLIC_APP_URL`, so every newly downloaded certificate points to the public Render website rather than `localhost` or a private hosting URL.
+
+The `.openai/hosting.json` file remains only as an optional development/backup deployment configuration. The submission URL does not require a ChatGPT account.
 
 ## 4. Acceptance test
 
