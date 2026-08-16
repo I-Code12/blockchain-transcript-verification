@@ -26,7 +26,7 @@
 .audit-head p strong{font-size:12px}.audit-head p span{font-size:10px;line-height:1.45;color:#b7c7dc}
 .audit-title{padding:26px 30px 18px;border-bottom:1px solid #edf1f6}
 .audit-title h2{font-size:22px}.audit-title span{padding:7px 12px;font-size:10px;font-weight:800}
-.audit .timeline.full{padding:10px 22px 25px;background:#fff}
+.audit .timeline.full{height:auto;min-height:0;padding:10px 22px 25px;background:#fff}
 .audit .timeline.full>div{grid-template-columns:46px minmax(0,1fr) minmax(110px,auto);gap:16px;align-items:center;margin:8px 0;padding:17px 16px;border:1px solid #e8edf4;border-radius:12px;background:#fbfcfe;transition:border-color .16s ease,box-shadow .16s ease,transform .16s ease}
 .audit .timeline.full>div:hover{border-color:#cbd8e9;box-shadow:0 8px 22px rgba(42,72,112,.08);transform:translateY(-1px)}
 .audit .timeline.full>div>i{width:42px;height:42px;border-radius:11px;background:#eaf1fa;color:#3f6fa8;font-size:14px;box-shadow:inset 0 0 0 1px #dce6f2}
