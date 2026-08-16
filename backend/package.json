@@ -1,0 +1,12 @@
+{
+  "name": "nexusverify-api",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "scripts": { "start": "node server.js", "test": "node --test tests/*.test.js" },
+  "dependencies": {
+    "ethers": "6.15.0",
+    "pdfkit": "0.17.2",
+    "qrcode": "1.5.4"
+  }
+}

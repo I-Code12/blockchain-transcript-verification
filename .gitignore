@@ -1,0 +1,15 @@
+node_modules/
+blockchain/data/
+blockchain/artifacts/
+blockchain/deployments/local.json
+dist/
+.next/
+.wrangler/
+.env
+*.db
+*.db-shm
+*.db-wal
+transcript_storage/*
+!transcript_storage/.gitkeep
+coverage/
+*.log
