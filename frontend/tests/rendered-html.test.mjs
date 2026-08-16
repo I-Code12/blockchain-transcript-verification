@@ -29,6 +29,9 @@ test("ships product metadata and no disposable starter", async () => {
   ]);
   assert.match(page, /Public credential verifier/);
   assert.match(page, /SHA-256/);
+  assert.match(page, /CONSENT-PROTECTED ACADEMIC RECORD/);
+  assert.match(page, /AES-256-GCM/);
+  assert.match(page, /Open encrypted source transcript PDF/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(page + layout + packageJson, /_sites-preview|react-loading-skeleton|codex-preview/);
 });

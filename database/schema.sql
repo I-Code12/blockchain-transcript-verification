@@ -33,6 +33,31 @@ CREATE TABLE IF NOT EXISTS audit_events (
   created_at TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS transcript_documents (
+  transcript_id TEXT PRIMARY KEY REFERENCES transcripts(id) ON DELETE CASCADE,
+  ciphertext BYTEA NOT NULL,
+  iv BYTEA NOT NULL,
+  auth_tag BYTEA NOT NULL,
+  content_type TEXT NOT NULL,
+  original_name TEXT NOT NULL,
+  size_bytes BIGINT NOT NULL,
+  results_ciphertext BYTEA NOT NULL,
+  results_iv BYTEA NOT NULL,
+  results_auth_tag BYTEA NOT NULL,
+  created_at TEXT NOT NULL
+);
+
+CREATE TABLE IF NOT EXISTS transcript_shares (
+  id BIGSERIAL PRIMARY KEY,
+  transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  expires_at TEXT NOT NULL,
+  created_at TEXT NOT NULL,
+  revoked_at TEXT,
+  views INTEGER NOT NULL DEFAULT 0
+);
+
 CREATE INDEX IF NOT EXISTS idx_transcripts_hash ON transcripts(document_hash);
 CREATE INDEX IF NOT EXISTS idx_transcripts_matric ON transcripts(matric_number);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at DESC);
+CREATE INDEX IF NOT EXISTS idx_shares_transcript_expiry ON transcript_shares(transcript_id, expires_at);

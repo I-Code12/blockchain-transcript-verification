@@ -5,7 +5,7 @@ This project is prepared for a public verifier, a secured registrar API, persist
 ## Security rules
 
 - Use a new demonstration-only Ethereum wallet. Never reuse a personal wallet.
-- Keep `REGISTRAR_PRIVATE_KEY`, `ADMIN_API_KEY` and the RPC provider URL in hosting secrets only.
+- Keep `REGISTRAR_PRIVATE_KEY`, `ADMIN_API_KEY`, `TRANSCRIPT_ENCRYPTION_KEY` and the RPC provider URL in hosting secrets only.
 - Never commit `.env`, real transcripts or private keys.
 - Do not enable `SEED_DEMO_DATA` in production.
 - Use a separate `DATABASE_PATH` for every deployed contract. The application refuses to erase or silently rebind an existing database.
@@ -41,6 +41,7 @@ The root `render.yaml` describes the Node API and a PostgreSQL datastore. Create
 - `BLOCKCHAIN_RPC_URL`
 - `REGISTRAR_PRIVATE_KEY`
 - `ADMIN_API_KEY` using at least 24 random characters
+- `TRANSCRIPT_ENCRYPTION_KEY` using 32 random bytes encoded as 64 hexadecimal characters
 - `PUBLIC_APP_URL`, `FRONTEND_URL` and `FRONTEND_URLS` are configured for `https://nexusverify-frontend.onrender.com`. Change all three together if the public domain changes.
 
 The production server listens on `0.0.0.0`, uses the assigned `PORT`, refuses to start without the registrar key and access key, and uses `DATABASE_URL` for PostgreSQL. Local mode continues to use SQLite. Render's free PostgreSQL service expires after 30 days, so create it close to the submission date or upgrade it for longer availability.
@@ -63,6 +64,8 @@ Complete all of these before submission:
 6. Verify it, revoke it, and confirm that the same QR now reports revoked.
 7. Restart or redeploy the API and confirm the database records remain.
 8. Confirm that issuance, revocation, transcript lists and audit history return `401` without the access key.
+9. Issue a credential with a PDF and course results, then create a temporary results link from **Transcript records**.
+10. Open that link in a private browser, confirm the results and original PDF are accessible, then confirm an incorrect code is rejected and logged.
 
 ## Submission evidence
 

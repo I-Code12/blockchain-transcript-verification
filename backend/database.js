@@ -28,9 +28,22 @@ if (usePostgres) {
       id BIGSERIAL PRIMARY KEY, action TEXT NOT NULL, transcript_id TEXT,
       detail TEXT NOT NULL, transaction_hash TEXT, block_number BIGINT, created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS transcript_documents (
+      transcript_id TEXT PRIMARY KEY REFERENCES transcripts(id) ON DELETE CASCADE,
+      ciphertext BYTEA NOT NULL, iv BYTEA NOT NULL, auth_tag BYTEA NOT NULL,
+      content_type TEXT NOT NULL, original_name TEXT NOT NULL, size_bytes BIGINT NOT NULL,
+      results_ciphertext BYTEA NOT NULL, results_iv BYTEA NOT NULL, results_auth_tag BYTEA NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS transcript_shares (
+      id BIGSERIAL PRIMARY KEY, transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+      revoked_at TEXT, views INTEGER NOT NULL DEFAULT 0
+    );
     CREATE INDEX IF NOT EXISTS idx_transcripts_hash ON transcripts(document_hash);
     CREATE INDEX IF NOT EXISTS idx_transcripts_matric ON transcripts(matric_number);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_shares_transcript_expiry ON transcript_shares(transcript_id, expires_at);
   `);
 } else {
   const dbPath = process.env.DATABASE_PATH
@@ -54,9 +67,22 @@ if (usePostgres) {
       id INTEGER PRIMARY KEY AUTOINCREMENT, action TEXT NOT NULL, transcript_id TEXT,
       detail TEXT NOT NULL, transaction_hash TEXT, block_number INTEGER, created_at TEXT NOT NULL
     );
+    CREATE TABLE IF NOT EXISTS transcript_documents (
+      transcript_id TEXT PRIMARY KEY REFERENCES transcripts(id) ON DELETE CASCADE,
+      ciphertext BLOB NOT NULL, iv BLOB NOT NULL, auth_tag BLOB NOT NULL,
+      content_type TEXT NOT NULL, original_name TEXT NOT NULL, size_bytes INTEGER NOT NULL,
+      results_ciphertext BLOB NOT NULL, results_iv BLOB NOT NULL, results_auth_tag BLOB NOT NULL,
+      created_at TEXT NOT NULL
+    );
+    CREATE TABLE IF NOT EXISTS transcript_shares (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
+      revoked_at TEXT, views INTEGER NOT NULL DEFAULT 0
+    );
     CREATE INDEX IF NOT EXISTS idx_transcripts_hash ON transcripts(document_hash);
     CREATE INDEX IF NOT EXISTS idx_transcripts_matric ON transcripts(matric_number);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_shares_transcript_expiry ON transcript_shares(transcript_id, expires_at);
     PRAGMA optimize;
   `);
 }
@@ -141,4 +167,48 @@ export async function addAudit(action, transcriptId, detail, proof={}) {
 export async function listAudit() {
   if (usePostgres) return (await pool.query("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 100")).rows;
   return sqlite.prepare("SELECT * FROM audit_events ORDER BY created_at DESC LIMIT 100").all();
+}
+
+export async function saveTranscriptDocument(item) {
+  const values = [item.transcriptId,item.ciphertext,item.iv,item.authTag,item.contentType,item.originalName,item.sizeBytes,item.resultsCiphertext,item.resultsIv,item.resultsAuthTag,new Date().toISOString()];
+  if (usePostgres) {
+    await pool.query(`INSERT INTO transcript_documents(transcript_id,ciphertext,iv,auth_tag,content_type,original_name,size_bytes,results_ciphertext,results_iv,results_auth_tag,created_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8,$9,$10,$11)
+      ON CONFLICT(transcript_id) DO UPDATE SET ciphertext=EXCLUDED.ciphertext,iv=EXCLUDED.iv,auth_tag=EXCLUDED.auth_tag,content_type=EXCLUDED.content_type,original_name=EXCLUDED.original_name,size_bytes=EXCLUDED.size_bytes,results_ciphertext=EXCLUDED.results_ciphertext,results_iv=EXCLUDED.results_iv,results_auth_tag=EXCLUDED.results_auth_tag,created_at=EXCLUDED.created_at`, values);
+    return;
+  }
+  sqlite.prepare(`INSERT INTO transcript_documents(transcript_id,ciphertext,iv,auth_tag,content_type,original_name,size_bytes,results_ciphertext,results_iv,results_auth_tag,created_at)
+    VALUES(?,?,?,?,?,?,?,?,?,?,?)
+    ON CONFLICT(transcript_id) DO UPDATE SET ciphertext=excluded.ciphertext,iv=excluded.iv,auth_tag=excluded.auth_tag,content_type=excluded.content_type,original_name=excluded.original_name,size_bytes=excluded.size_bytes,results_ciphertext=excluded.results_ciphertext,results_iv=excluded.results_iv,results_auth_tag=excluded.results_auth_tag,created_at=excluded.created_at`).run(...values);
+}
+
+export async function getTranscriptDocument(id) {
+  if (usePostgres) return (await pool.query("SELECT * FROM transcript_documents WHERE transcript_id=$1", [id])).rows[0];
+  return sqlite.prepare("SELECT * FROM transcript_documents WHERE transcript_id=?").get(id);
+}
+
+export async function hasTranscriptDocument(id) {
+  if (usePostgres) return Boolean((await pool.query("SELECT 1 FROM transcript_documents WHERE transcript_id=$1", [id])).rowCount);
+  return Boolean(sqlite.prepare("SELECT 1 FROM transcript_documents WHERE transcript_id=?").get(id));
+}
+
+export async function createTranscriptShare(transcriptId, tokenHash, expiresAt) {
+  const now = new Date().toISOString();
+  if (usePostgres) {
+    await pool.query("INSERT INTO transcript_shares(transcript_id,token_hash,expires_at,created_at) VALUES($1,$2,$3,$4)", [transcriptId,tokenHash,expiresAt,now]);
+    return;
+  }
+  sqlite.prepare("INSERT INTO transcript_shares(transcript_id,token_hash,expires_at,created_at) VALUES(?,?,?,?)").run(transcriptId,tokenHash,expiresAt,now);
+}
+
+export async function useTranscriptShare(transcriptId, tokenHash) {
+  const now = new Date().toISOString();
+  if (usePostgres) {
+    const row = (await pool.query("SELECT * FROM transcript_shares WHERE transcript_id=$1 AND token_hash=$2 AND revoked_at IS NULL AND expires_at>$3 LIMIT 1", [transcriptId,tokenHash,now])).rows[0];
+    if (row) await pool.query("UPDATE transcript_shares SET views=views+1 WHERE id=$1", [row.id]);
+    return row;
+  }
+  const row = sqlite.prepare("SELECT * FROM transcript_shares WHERE transcript_id=? AND token_hash=? AND revoked_at IS NULL AND expires_at>? LIMIT 1").get(transcriptId,tokenHash,now);
+  if (row) sqlite.prepare("UPDATE transcript_shares SET views=views+1 WHERE id=?").run(row.id);
+  return row;
 }
