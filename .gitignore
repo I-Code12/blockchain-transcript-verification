@@ -6,6 +6,8 @@ dist/
 .next/
 .wrangler/
 .env
+.nexusverify.local.env
+REGISTRAR_ACCESS.txt
 *.db
 *.db-shm
 *.db-wal

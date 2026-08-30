@@ -27,4 +27,14 @@ test("protected document metadata and expiring shares persist", async () => {
   const share = await db.useTranscriptShare("NXV-TEST-PROTECTED", "share-hash");
   assert.equal(share.transcript_id, "NXV-TEST-PROTECTED");
   assert.equal(await db.useTranscriptShare("NXV-TEST-PROTECTED", "wrong-hash"), undefined);
+
+  const request = await db.createAccessRequest({
+    transcriptId:"NXV-TEST-PROTECTED",tokenHash:"private-request-token-hash",requesterName:"External Verifier",
+    organization:"Example Employer",purpose:"Confirm results for graduate recruitment",expiresAt:new Date(Date.now()+60_000).toISOString(),
+  });
+  assert.equal(request.status, "Pending");
+  const approved = await db.approveAccessRequest(request.id, new Date(Date.now()+120_000).toISOString());
+  assert.equal(approved.status, "Approved");
+  assert.equal((await db.findAccessRequestByToken("private-request-token-hash")).requester_name, "External Verifier");
+  assert.equal((await db.useTranscriptShare("NXV-TEST-PROTECTED", "private-request-token-hash")).transcript_id, "NXV-TEST-PROTECTED");
 });

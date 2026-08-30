@@ -57,7 +57,22 @@ CREATE TABLE IF NOT EXISTS transcript_shares (
   views INTEGER NOT NULL DEFAULT 0
 );
 
+CREATE TABLE IF NOT EXISTS transcript_access_requests (
+  id BIGSERIAL PRIMARY KEY,
+  transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+  token_hash TEXT NOT NULL UNIQUE,
+  requester_name TEXT NOT NULL,
+  organization TEXT NOT NULL,
+  purpose TEXT NOT NULL,
+  status TEXT NOT NULL CHECK (status IN ('Pending', 'Approved', 'Denied', 'Expired')),
+  created_at TEXT NOT NULL,
+  expires_at TEXT NOT NULL,
+  decided_at TEXT,
+  access_expires_at TEXT
+);
+
 CREATE INDEX IF NOT EXISTS idx_transcripts_hash ON transcripts(document_hash);
 CREATE INDEX IF NOT EXISTS idx_transcripts_matric ON transcripts(matric_number);
 CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at DESC);
 CREATE INDEX IF NOT EXISTS idx_shares_transcript_expiry ON transcript_shares(transcript_id, expires_at);
+CREATE INDEX IF NOT EXISTS idx_access_requests_status_created ON transcript_access_requests(status, created_at DESC);

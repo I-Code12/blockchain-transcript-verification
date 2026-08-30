@@ -2,7 +2,7 @@ import { createServer } from "node:http";
 import { createHash, timingSafeEqual } from "node:crypto";
 import QRCode from "qrcode";
 import { createCertificate } from "./certificate.js";
-import { addAudit, bindContract, countTranscripts, createTranscriptShare, databaseEngine, findTranscript, getTranscriptDocument, hasTranscriptDocument, incrementChecks, insertTranscript, listAudit, listTranscripts, markRevoked, nextCredentialId, saveTranscriptDocument, useTranscriptShare } from "./database.js";
+import { addAudit, approveAccessRequest, bindContract, countTranscripts, createAccessRequest, createTranscriptShare, databaseEngine, denyAccessRequest, findAccessRequestByToken, findTranscript, getTranscriptDocument, hasTranscriptDocument, incrementChecks, insertTranscript, listAccessRequests, listAudit, listTranscripts, markRevoked, nextCredentialId, saveTranscriptDocument, useTranscriptShare } from "./database.js";
 import { chainStatus, connectChain, issueOnChain, revokeOnChain, signProofPayload, verifyOnChain } from "./chain.js";
 import { decryptTranscript, encryptTranscript, generateShareCode, hashShareCode, isPdf, sanitizeResults } from "./privacy.js";
 
@@ -15,12 +15,15 @@ const adminKey = process.env.ADMIN_API_KEY?.trim() || "";
 const protectedAccessAttempts = new Map();
 const protectedAccessWindowMs = 10 * 60_000;
 const protectedAccessLimit = 10;
+const accessRequestSubmissions = new Map();
+const accessRequestWindowMs = 60 * 60_000;
+const accessRequestLimit = 5;
 if (process.env.NODE_ENV === "production" && adminKey.length < 24) throw new Error("ADMIN_API_KEY must contain at least 24 characters in production");
 const hashDocument = (content) => createHash("sha256").update(content).digest("hex");
 const responseHeaders = (req) => {
   const origin = req.headers.origin?.replace(/\/$/, "");
   const corsOrigin = origin && allowedOrigins.has(origin) ? origin : [...allowedOrigins][0];
-  return { "content-type": "application/json", "access-control-allow-origin": corsOrigin, "vary": "Origin", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,x-admin-key,x-transcript-access", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "cache-control": "no-store" };
+  return { "content-type": "application/json", "access-control-allow-origin": corsOrigin, "vary": "Origin", "access-control-allow-methods": "GET,POST,OPTIONS", "access-control-allow-headers": "content-type,x-admin-key,x-transcript-access,x-request-token", "x-content-type-options": "nosniff", "referrer-policy": "no-referrer", "cache-control": "no-store" };
 };
 const reply = (req, res, status, value) => { res.writeHead(status, responseHeaders(req)); res.end(status === 204 ? "" : JSON.stringify(value)); };
 const binary = (req, res, contentType, filename, value, disposition="attachment") => { res.writeHead(200, { ...responseHeaders(req), "content-type": contentType, "content-disposition": `${disposition}; filename="${filename}"`, "content-length": value.length }); res.end(value); };
@@ -42,6 +45,13 @@ const recordProtectedAccessFailure = (req, transcriptId) => {
   protectedAccessAttempts.set(key,!state||now-state.startedAt>=protectedAccessWindowMs?{startedAt:now,failures:1}:{...state,failures:state.failures+1});
 };
 const clearProtectedAccessFailures = (req, transcriptId) => protectedAccessAttempts.delete(protectedAccessKey(req,transcriptId));
+const recordAccessRequestSubmission = (req, transcriptId) => {
+  const key=protectedAccessKey(req,transcriptId); const now=Date.now(); const state=accessRequestSubmissions.get(key);
+  if(!state||now-state.startedAt>=accessRequestWindowMs){accessRequestSubmissions.set(key,{startedAt:now,count:1});return true;}
+  if(state.count>=accessRequestLimit)return false;
+  accessRequestSubmissions.set(key,{...state,count:state.count+1});return true;
+};
+const cleanText = (value, maximum) => String(value || "").replace(/\s+/g," ").trim().slice(0,maximum);
 const verificationUrlFor = (row) => `${verificationBaseUrl}/?verify=${encodeURIComponent(row.id)}&hash=${encodeURIComponent(row.document_hash)}`;
 const present = async (row, qr=false) => {
   const value = { id:row.id,name:row.student_name,matric:row.matric_number,degree:row.programme,award:row.award,date:new Date(row.issued_at).toLocaleDateString("en-GB",{day:"2-digit",month:"short",year:"numeric"}),hash:row.document_hash,tx:row.transaction_hash,block:Number(row.block_number),status:row.status,checks:Number(row.checks),contract:row.contract_address,chainId:Number(row.chain_id),gasUsed:row.gas_used,explorerUrl:explorerBaseUrl?`${explorerBaseUrl}/tx/${row.transaction_hash}`:undefined,revocationTx:row.revocation_tx??undefined,revocationBlock:row.revocation_block??undefined,resultsAvailable:await hasTranscriptDocument(row.id) };
@@ -101,6 +111,32 @@ createServer(async (req,res) => {
     if (req.method === "GET" && req.url === "/health") return send(200,{status:"ok",service:"nexusverify-api",...(await chainStatus()),database:databaseEngine,adminProtected:Boolean(adminKey)});
     if (req.method === "GET" && req.url === "/api/transcripts") { if (requireAdmin()) return; return send(200,{records:await Promise.all((await listTranscripts()).map(row=>present(row)))}); }
     if (req.method === "GET" && req.url === "/api/audit") { if (requireAdmin()) return; return send(200,{events:await listAudit()}); }
+    if (req.method === "GET" && requestUrl.pathname === "/api/access-requests") {
+      if (requireAdmin()) return;
+      return send(200,{requests:await listAccessRequests()});
+    }
+    if (req.method === "GET" && requestUrl.pathname === "/api/access-requests/status") {
+      const token=String(req.headers["x-request-token"]||"").trim();
+      if(token.length<20)return send(401,{message:"A valid private request link is required"});
+      const accessRequest=await findAccessRequestByToken(hashShareCode(token));
+      if(!accessRequest)return send(404,{message:"Access request not found"});
+      const status=accessRequest.status==="Approved"&&accessRequest.access_expires_at&&accessRequest.access_expires_at<=new Date().toISOString()?"Expired":accessRequest.status;
+      return send(200,{requestId:Number(accessRequest.id),credentialId:accessRequest.transcript_id,status,requesterName:accessRequest.requester_name,organization:accessRequest.organization,purpose:accessRequest.purpose,createdAt:accessRequest.created_at,expiresAt:accessRequest.expires_at,accessExpiresAt:accessRequest.access_expires_at});
+    }
+    const requestDecisionMatch=requestUrl.pathname.match(/^\/api\/access-requests\/(\d+)\/(approve|deny)$/);
+    if(requestDecisionMatch&&req.method==="POST"){
+      if(requireAdmin())return;
+      const requestId=Number(requestDecisionMatch[1]); const action=requestDecisionMatch[2];
+      if(action==="approve"){
+        const input=await parseBody(req); const minutes=Math.max(5,Math.min(1440,Number(input.minutes)||60)); const accessExpiresAt=new Date(Date.now()+minutes*60_000).toISOString();
+        const updated=await approveAccessRequest(requestId,accessExpiresAt);
+        await addAudit("Transcript access approved",updated.transcript_id,`Request #${requestId} - access expires ${new Date(accessExpiresAt).toLocaleString("en-GB")}`);
+        return send(200,{requestId,status:updated.status,credentialId:updated.transcript_id,accessExpiresAt});
+      }
+      const updated=await denyAccessRequest(requestId); if(!updated)return send(404,{message:"Pending access request not found"});
+      await addAudit("Transcript access denied",updated.transcript_id,`Request #${requestId}`);
+      return send(200,{requestId,status:updated.status,credentialId:updated.transcript_id});
+    }
     if (req.method === "GET" && req.url?.startsWith("/api/proof/")) {
       const id=decodeURIComponent(req.url.split("/").pop()); const row=await findTranscript(id); if(!row)return send(404,{message:"Credential not found"});
       const proof=await signedProof(row); await addAudit("Signed proof downloaded",row.id,`${row.student_name} - technical JSON`); return send(200,proof);
@@ -142,6 +178,20 @@ createServer(async (req,res) => {
         const pdf=decryptTranscript(document); await addAudit("Protected transcript PDF viewed",row.id,"Authorised temporary access");
         return sendBinary("application/pdf",document.original_name,pdf,"inline");
       }
+    }
+    const accessRequestMatch=requestUrl.pathname.match(/^\/api\/transcripts\/([^/]+)\/access-requests$/);
+    if(accessRequestMatch&&req.method==="POST"){
+      const id=decodeURIComponent(accessRequestMatch[1]); const row=await findTranscript(id);
+      if(!row)return send(404,{message:"Credential not found"});
+      if(!await hasTranscriptDocument(row.id))return send(404,{message:"No protected transcript is stored for this credential"});
+      if(!recordAccessRequestSubmission(req,row.id))return send(429,{message:"Too many access requests. Try again later"});
+      const input=await parseBody(req); const requesterName=cleanText(input.requesterName,80); const organization=cleanText(input.organization,120); const purpose=cleanText(input.purpose,500);
+      if(requesterName.length<2||organization.length<2||purpose.length<10)return send(400,{message:"Requester name, organisation and a clear reason are required"});
+      const token=generateShareCode(); const expiresAt=new Date(Date.now()+24*60*60_000).toISOString();
+      const accessRequest=await createAccessRequest({transcriptId:row.id,tokenHash:hashShareCode(token),requesterName,organization,purpose,expiresAt});
+      const requestUrl=`${verificationBaseUrl}/?verify=${encodeURIComponent(row.id)}#request=${encodeURIComponent(token)}`;
+      await addAudit("Transcript access requested",row.id,`${organization} - request #${accessRequest.id}`);
+      return send(201,{requestId:Number(accessRequest.id),credentialId:row.id,status:"Pending",requestToken:token,requestUrl,createdAt:accessRequest.created_at,expiresAt});
     }
     if (req.method === "POST" && req.url === "/api/transcripts") {
       if (requireAdmin()) return;

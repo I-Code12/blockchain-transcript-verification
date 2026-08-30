@@ -6,7 +6,9 @@ async function render() {
   const workerUrl = new URL("../dist/server/index.js", import.meta.url);
   workerUrl.searchParams.set("test", `${process.pid}-${Date.now()}`);
   const { default: worker } = await import(workerUrl.href);
-  return worker.fetch(new Request("http://localhost/", { headers: { accept: "text/html", host: "localhost" } }), { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
+  const request = new Request("http://localhost/", { headers: { accept: "text/html", host: "localhost" } });
+  if (typeof worker === "function") return worker(request);
+  return worker.fetch(request, { ASSETS: { fetch: async () => new Response("Not found", { status: 404 }) } }, { waitUntil() {}, passThroughOnException() {} });
 }
 
 test("server-renders the NexusVerify product", async () => {
@@ -32,6 +34,9 @@ test("ships product metadata and no disposable starter", async () => {
   assert.match(page, /CONSENT-PROTECTED ACADEMIC RECORD/);
   assert.match(page, /AES-256-GCM/);
   assert.match(page, /Open encrypted source transcript PDF/);
+  assert.match(page, /Request temporary transcript access/);
+  assert.match(page, /Transcript access requests/);
+  assert.match(page, /Send request to registrar/);
   assert.match(layout, /og\.png/);
   assert.doesNotMatch(page + layout + packageJson, /_sites-preview|react-loading-skeleton|codex-preview/);
 });

@@ -17,7 +17,7 @@ function ConvertFrom-LocalSecureString {
 Write-Host "NexusVerify - Ethereum Sepolia deployment" -ForegroundColor Cyan
 Write-Host "Expected registrar wallet: $expectedWallet"
 Write-Host "Use only a dedicated demonstration wallet. Nothing entered here is written to a file." -ForegroundColor Yellow
-Write-Host "The Alchemy key previously shared in chat must be rotated before continuing." -ForegroundColor Yellow
+Write-Host "Use a current private RPC endpoint and rotate any credential that may have been exposed." -ForegroundColor Yellow
 Write-Host ""
 
 $confirmation = Read-Host "Type DEPLOY to continue"

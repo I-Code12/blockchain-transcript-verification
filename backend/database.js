@@ -40,10 +40,17 @@ if (usePostgres) {
       token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
       revoked_at TEXT, views INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS transcript_access_requests (
+      id BIGSERIAL PRIMARY KEY, transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE, requester_name TEXT NOT NULL, organization TEXT NOT NULL,
+      purpose TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('Pending','Approved','Denied','Expired')),
+      created_at TEXT NOT NULL, expires_at TEXT NOT NULL, decided_at TEXT, access_expires_at TEXT
+    );
     CREATE INDEX IF NOT EXISTS idx_transcripts_hash ON transcripts(document_hash);
     CREATE INDEX IF NOT EXISTS idx_transcripts_matric ON transcripts(matric_number);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_shares_transcript_expiry ON transcript_shares(transcript_id, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_access_requests_status_created ON transcript_access_requests(status, created_at DESC);
   `);
 } else {
   const dbPath = process.env.DATABASE_PATH
@@ -79,10 +86,17 @@ if (usePostgres) {
       token_hash TEXT NOT NULL UNIQUE, expires_at TEXT NOT NULL, created_at TEXT NOT NULL,
       revoked_at TEXT, views INTEGER NOT NULL DEFAULT 0
     );
+    CREATE TABLE IF NOT EXISTS transcript_access_requests (
+      id INTEGER PRIMARY KEY AUTOINCREMENT, transcript_id TEXT NOT NULL REFERENCES transcripts(id) ON DELETE CASCADE,
+      token_hash TEXT NOT NULL UNIQUE, requester_name TEXT NOT NULL, organization TEXT NOT NULL,
+      purpose TEXT NOT NULL, status TEXT NOT NULL CHECK(status IN ('Pending','Approved','Denied','Expired')),
+      created_at TEXT NOT NULL, expires_at TEXT NOT NULL, decided_at TEXT, access_expires_at TEXT
+    );
     CREATE INDEX IF NOT EXISTS idx_transcripts_hash ON transcripts(document_hash);
     CREATE INDEX IF NOT EXISTS idx_transcripts_matric ON transcripts(matric_number);
     CREATE INDEX IF NOT EXISTS idx_audit_created ON audit_events(created_at DESC);
     CREATE INDEX IF NOT EXISTS idx_shares_transcript_expiry ON transcript_shares(transcript_id, expires_at);
+    CREATE INDEX IF NOT EXISTS idx_access_requests_status_created ON transcript_access_requests(status, created_at DESC);
     PRAGMA optimize;
   `);
 }
@@ -211,4 +225,90 @@ export async function useTranscriptShare(transcriptId, tokenHash) {
   const row = sqlite.prepare("SELECT * FROM transcript_shares WHERE transcript_id=? AND token_hash=? AND revoked_at IS NULL AND expires_at>? LIMIT 1").get(transcriptId,tokenHash,now);
   if (row) sqlite.prepare("UPDATE transcript_shares SET views=views+1 WHERE id=?").run(row.id);
   return row;
+}
+
+export async function createAccessRequest({transcriptId, tokenHash, requesterName, organization, purpose, expiresAt}) {
+  const createdAt = new Date().toISOString();
+  const values = [transcriptId,tokenHash,requesterName,organization,purpose,"Pending",createdAt,expiresAt];
+  if (usePostgres) {
+    return (await pool.query(`INSERT INTO transcript_access_requests(transcript_id,token_hash,requester_name,organization,purpose,status,created_at,expires_at)
+      VALUES($1,$2,$3,$4,$5,$6,$7,$8) RETURNING *`, values)).rows[0];
+  }
+  const result = sqlite.prepare(`INSERT INTO transcript_access_requests(transcript_id,token_hash,requester_name,organization,purpose,status,created_at,expires_at)
+    VALUES(?,?,?,?,?,?,?,?)`).run(...values);
+  return sqlite.prepare("SELECT * FROM transcript_access_requests WHERE id=?").get(result.lastInsertRowid);
+}
+
+export async function listAccessRequests() {
+  const now = new Date().toISOString();
+  if (usePostgres) {
+    await pool.query("UPDATE transcript_access_requests SET status='Expired' WHERE status='Pending' AND expires_at<=$1", [now]);
+    await pool.query("UPDATE transcript_access_requests SET status='Expired' WHERE status='Approved' AND access_expires_at<=$1", [now]);
+    return (await pool.query(`SELECT r.*,t.student_name,t.matric_number FROM transcript_access_requests r
+      JOIN transcripts t ON t.id=r.transcript_id ORDER BY CASE r.status WHEN 'Pending' THEN 0 ELSE 1 END,r.created_at DESC LIMIT 100`)).rows;
+  }
+  sqlite.prepare("UPDATE transcript_access_requests SET status='Expired' WHERE status='Pending' AND expires_at<=?").run(now);
+  sqlite.prepare("UPDATE transcript_access_requests SET status='Expired' WHERE status='Approved' AND access_expires_at<=?").run(now);
+  return sqlite.prepare(`SELECT r.*,t.student_name,t.matric_number FROM transcript_access_requests r
+    JOIN transcripts t ON t.id=r.transcript_id ORDER BY CASE r.status WHEN 'Pending' THEN 0 ELSE 1 END,r.created_at DESC LIMIT 100`).all();
+}
+
+export async function findAccessRequestByToken(tokenHash) {
+  const now = new Date().toISOString();
+  if (usePostgres) {
+    await pool.query("UPDATE transcript_access_requests SET status='Expired' WHERE token_hash=$1 AND status='Pending' AND expires_at<=$2", [tokenHash,now]);
+    await pool.query("UPDATE transcript_access_requests SET status='Expired' WHERE token_hash=$1 AND status='Approved' AND access_expires_at<=$2", [tokenHash,now]);
+    return (await pool.query("SELECT * FROM transcript_access_requests WHERE token_hash=$1 LIMIT 1", [tokenHash])).rows[0];
+  }
+  sqlite.prepare("UPDATE transcript_access_requests SET status='Expired' WHERE token_hash=? AND status='Pending' AND expires_at<=?").run(tokenHash,now);
+  sqlite.prepare("UPDATE transcript_access_requests SET status='Expired' WHERE token_hash=? AND status='Approved' AND access_expires_at<=?").run(tokenHash,now);
+  return sqlite.prepare("SELECT * FROM transcript_access_requests WHERE token_hash=? LIMIT 1").get(tokenHash);
+}
+
+export async function approveAccessRequest(id, accessExpiresAt) {
+  const decidedAt = new Date().toISOString();
+  if (usePostgres) {
+    const client = await pool.connect();
+    try {
+      await client.query("BEGIN");
+      const row = (await client.query("SELECT * FROM transcript_access_requests WHERE id=$1 FOR UPDATE", [id])).rows[0];
+      if (!row) throw new Error("Access request not found");
+      if (row.status !== "Pending") throw new Error(`Access request is already ${row.status.toLowerCase()}`);
+      if (row.expires_at <= decidedAt) throw new Error("Access request has expired");
+      await client.query("INSERT INTO transcript_shares(transcript_id,token_hash,expires_at,created_at) VALUES($1,$2,$3,$4)", [row.transcript_id,row.token_hash,accessExpiresAt,decidedAt]);
+      const updated = (await client.query("UPDATE transcript_access_requests SET status='Approved',decided_at=$1,access_expires_at=$2 WHERE id=$3 RETURNING *", [decidedAt,accessExpiresAt,id])).rows[0];
+      await client.query("COMMIT");
+      return updated;
+    } catch (error) { await client.query("ROLLBACK"); throw error; } finally { client.release(); }
+  }
+  sqlite.exec("BEGIN IMMEDIATE");
+  try {
+    const row = sqlite.prepare("SELECT * FROM transcript_access_requests WHERE id=?").get(id);
+    if (!row) throw new Error("Access request not found");
+    if (row.status !== "Pending") throw new Error(`Access request is already ${row.status.toLowerCase()}`);
+    if (row.expires_at <= decidedAt) throw new Error("Access request has expired");
+    sqlite.prepare("INSERT INTO transcript_shares(transcript_id,token_hash,expires_at,created_at) VALUES(?,?,?,?)").run(row.transcript_id,row.token_hash,accessExpiresAt,decidedAt);
+    sqlite.prepare("UPDATE transcript_access_requests SET status='Approved',decided_at=?,access_expires_at=? WHERE id=?").run(decidedAt,accessExpiresAt,id);
+    const updated=sqlite.prepare("SELECT * FROM transcript_access_requests WHERE id=?").get(id);
+    sqlite.exec("COMMIT");
+    return updated;
+  } catch(error) {
+    sqlite.exec("ROLLBACK");
+    throw error;
+  }
+}
+
+export async function denyAccessRequest(id) {
+  const decidedAt = new Date().toISOString();
+  if (usePostgres) {
+    const row=(await pool.query("SELECT * FROM transcript_access_requests WHERE id=$1",[id])).rows[0];
+    if(!row)throw new Error("Access request not found");
+    if(row.status!=="Pending")throw new Error(`Access request is already ${row.status.toLowerCase()}`);
+    return (await pool.query("UPDATE transcript_access_requests SET status='Denied',decided_at=$1 WHERE id=$2 RETURNING *", [decidedAt,id])).rows[0];
+  }
+  const row=sqlite.prepare("SELECT * FROM transcript_access_requests WHERE id=?").get(id);
+  if(!row)throw new Error("Access request not found");
+  if(row.status!=="Pending")throw new Error(`Access request is already ${row.status.toLowerCase()}`);
+  sqlite.prepare("UPDATE transcript_access_requests SET status='Denied',decided_at=? WHERE id=?").run(decidedAt,id);
+  return sqlite.prepare("SELECT * FROM transcript_access_requests WHERE id=?").get(id);
 }

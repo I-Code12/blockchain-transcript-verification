@@ -50,7 +50,7 @@ The production server listens on `0.0.0.0`, uses the assigned `PORT`, refuses to
 
 The public website is deployed as the free Render web service `nexusverify-frontend` at `https://nexusverify-frontend.onrender.com`. It builds from the `frontend` directory with `npm ci && npm run build`, starts with `npm start`, and uses `VITE_API_URL=https://nexusverify-api.onrender.com` and `VITE_PUBLIC_MODE=true`. Public mode opens directly on credential verification; registrar screens remain protected by the access key. The QR generator uses `PUBLIC_APP_URL`, so every newly downloaded certificate points to the public Render website rather than `localhost` or a private hosting URL.
 
-The `.openai/hosting.json` file remains only as an optional development/backup deployment configuration. The submission URL does not require a ChatGPT account.
+The optional backup hosting configuration is not used by the Render submission URL. Public verification requires no user account.
 
 ## 4. Acceptance test
 
